@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>픽셀 러닝 게임 완전판</title>
+<style>
+body { 
+    margin: 0; 
+    background: #111; 
+    overflow: hidden; 
+    font-family: sans-serif; 
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+canvas { 
+    background: #222; 
+    display: block; 
+    margin: 0 auto; 
+    image-rendering: pixelated;
+    max-width: 100vw;
+    max-height: 100vh;
+    transform: translateZ(0); /* 하드웨어 가속 활성화 */
+    will-change: transform; /* 브라우저 최적화 힌트 */
+}
+#ui { 
+    position: absolute; 
+    top: 10px; 
+    left: 10px; 
+    color: white; 
+    font-size: clamp(14px, 4vw, 20px);
+    z-index: 10;
+}
+#modeSelect { 
+    position: absolute; 
+    top: 40px; 
+    left: 10px; 
+    z-index: 10;
+}
+button { 
+    margin-right: 5px; 
+    padding: 8px 12px;
+    font-size: clamp(12px, 3vw, 16px);
+    border: none;
+    background: #444;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+}
+button:hover { background: #555; }
+button:active { background: #666; }
+
+/* 모바일 컨트롤 버튼 */
+#mobileControls {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 20px;
+    z-index: 10;
+}
+
+.mobile-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+}
+
+.mobile-btn:active {
+    background: rgba(255, 255, 255, 0.4);
+    transform: scale(0.95);
+}
+
+/* 모바일에서만 표시 */
+@media (max-width: 768px) {
+    #mobileControls { display: flex; }
+    #modeSelect button { 
+        font-size: 14px;
+        padding: 6px 10px;
+    }
+}
+
+/* 데스크톱에서 숨김 */
+@media (min-width: 769px) {
+    #mobileControls { display: none; }
+}
+
+/* 게임 시작 메시지 스타일 */
+#gameStartMessage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 30px;
+    border-radius: 15px;
+    border: 3px solid #fff;
+    min-width: 300px;
+}
+
+#countdown {
+    font-size: 4rem;
+    font-weight: bold;
+    margin-bottom: 20px;
+    color: #ff6b6b;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    animation: pulse 1s infinite;
+}
+
+#gameMode {
+    font-size: 1.5rem;
+    margin-bottom: 15px;
+    color: #4ecdc4;
+    font-weight: bold;
+}
+
+#readyText {
+    font-size: 1.2rem;
+    color: #ffe66d;
+    font-weight: bold;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+</style>
+</head>
+<body>
+<div id="ui">점수: 0 | 거리: 0m</div>
+<div id="modeSelect">
+<button onclick="startGame('classic')">클래식</button>
+<button onclick="startGame('time')">타임 어택</button>
+<button onclick="startGame('survival')">서바이벌</button>
+<button onclick="startGame('challenge')">챌린지</button>
+</div>
+
+<!-- 게임 시작 메시지 -->
+<div id="gameStartMessage" style="display: none;">
+    <div id="countdown">3</div>
+    <div id="gameMode">클래식 모드</div>
+    <div id="readyText">준비하세요!</div>
+</div>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+
+<!-- 모바일 컨트롤 버튼 -->
+<div id="mobileControls">
+    <div class="mobile-btn" id="leftBtn">←</div>
+    <div class="mobile-btn" id="jumpBtn">↑</div>
+    <div class="mobile-btn" id="slideBtn">↓</div>
+    <div class="mobile-btn" id="rightBtn">→</div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const lanes = [100,200,300];
+let playerLane = 1;
+let playerY = 500;
+let playerState = 'run'; // run, jump, slide
+let playerAnimFrame = 0; // 애니메이션 프레임
+let jumpStartY = 0; // 점프 시작 Y 위치
+let slideStartFrame = 0; // 슬라이드 시작 프레임
+
+let obstacles = [];
+let coins = [];
+let powerups = [];
+let chaser = {x: lanes[1], y:400};
+
+let speed = 5;
+let frame = 0;
+let distance = 0;
+let score = 0;
+let mode = null; // 게임이 시작되지 않은 상태
+let timeLeft = 60; // 타임어택용
+let gameOver = true; // 초기에는 게임이 시작되지 않은 상태
+let gameRunning = false; // 게임이 실행 중인지 여부
+let animationId = null; // requestAnimationFrame ID
+let health = 100; // 서바이벌 모드용 생명력
+
+// 기록 저장 시스템
+let gameRecords = {
+    classic: { best: 0, last: 0 },
+    time: { best: 0, last: 0 },
+    survival: { best: 0, last: 0 },
+    challenge: { best: 0, last: 0 }
+};
+
+// 기록 로드 함수
+function loadRecords() {
+    const saved = localStorage.getItem('pixelRunRecords');
+    if(saved) {
+        gameRecords = JSON.parse(saved);
+    }
+}
+
+// 기록 저장 함수
+function saveRecords() {
+    localStorage.setItem('pixelRunRecords', JSON.stringify(gameRecords));
+}
+
+// 기록 업데이트 함수
+function updateRecord(mode, score) {
+    gameRecords[mode].last = score;
+    if(score > gameRecords[mode].best) {
+        gameRecords[mode].best = score;
+    }
+    saveRecords();
+}
+
+// 키 이벤트
+document.addEventListener('keydown', e=>{
+    if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
+    
+    if(e.key==='ArrowLeft' && playerLane>0) playerLane--;
+    if(e.key==='ArrowRight' && playerLane<2) playerLane++;
+    if(e.key==='ArrowUp' && playerState==='run') {
+        jumpStartY = playerY;
+        playerState='jump';
+        playerAnimFrame = 0;
+    }
+    if(e.key==='ArrowDown' && playerState==='run') {
+        playerState='slide';
+        playerAnimFrame = 0;
+    }
+});
+
+// 모바일 컨트롤 이벤트
+function setupMobileControls() {
+    const leftBtn = document.getElementById('leftBtn');
+    const rightBtn = document.getElementById('rightBtn');
+    const jumpBtn = document.getElementById('jumpBtn');
+    const slideBtn = document.getElementById('slideBtn');
+
+    // 터치 이벤트 처리
+    function addTouchEvents(element, action) {
+        element.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            action();
+        });
+        element.addEventListener('click', (e) => {
+            e.preventDefault();
+            action();
+        });
+    }
+
+    addTouchEvents(leftBtn, () => {
+        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
+        if(playerLane > 0) playerLane--;
+    });
+    
+    addTouchEvents(rightBtn, () => {
+        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
+        if(playerLane < 2) playerLane++;
+    });
+    
+    addTouchEvents(jumpBtn, () => {
+        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
+        if(playerState === 'run') {
+            jumpStartY = playerY;
+            playerState = 'jump';
+            playerAnimFrame = 0;
+        }
+    });
+    
+    addTouchEvents(slideBtn, () => {
+        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
+        if(playerState === 'run') {
+            playerState = 'slide';
+            playerAnimFrame = 0;
+        }
+    });
+}
+
+// 스와이프 제스처 지원
+let touchStartX = 0;
+let touchStartY = 0;
+
+document.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+});
+
+document.addEventListener('touchend', (e) => {
+    if(gameOver || !mode) return;
+    
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+    
+    const minSwipeDistance = 50;
+    
+    if(Math.abs(deltaX) > Math.abs(deltaY)) {
+        // 좌우 스와이프
+        if(Math.abs(deltaX) > minSwipeDistance) {
+            if(deltaX > 0 && playerLane < 2) {
+                playerLane++; // 오른쪽 스와이프
+            } else if(deltaX < 0 && playerLane > 0) {
+                playerLane--; // 왼쪽 스와이프
+            }
+        }
+    } else {
+        // 상하 스와이프
+        if(Math.abs(deltaY) > minSwipeDistance) {
+            if(deltaY < 0 && playerState === 'run') {
+                jumpStartY = playerY;
+                playerState = 'jump'; // 위로 스와이프
+                playerAnimFrame = 0;
+            } else if(deltaY > 0 && playerState === 'run') {
+                playerState = 'slide'; // 아래로 스와이프
+                playerAnimFrame = 0;
+            }
+        }
+    }
+});
+
+// 캔버스 크기 조정
+function resizeCanvas() {
+    const canvas = document.getElementById('gameCanvas');
+    const container = document.body;
+    
+    const maxWidth = Math.min(window.innerWidth, 400);
+    const maxHeight = Math.min(window.innerHeight * 0.8, 600);
+    
+    canvas.width = maxWidth;
+    canvas.height = maxHeight;
+    
+    // 레인 위치 재조정
+    lanes[0] = maxWidth * 0.25;
+    lanes[1] = maxWidth * 0.5;
+    lanes[2] = maxWidth * 0.75;
+    
+    playerY = maxHeight - 100;
+    chaser.y = maxHeight - 200;
+}
+
+// 윈도우 리사이즈 이벤트
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+});
+
+// 초기화
+setupMobileControls();
+resizeCanvas();
+
+// 게임 시작
+function startGame(selectedMode){
+    console.log(`현재 게임시작: ${selectedMode} 모드`);
+    
+    // 모드 선택 버튼 숨기기
+    document.getElementById('modeSelect').style.display = 'none';
+    
+    // 게임 모드 텍스트 설정
+    const modeTexts = {
+        'classic': '클래식 모드',
+        'time': '타임 어택 모드',
+        'survival': '서바이벌 모드',
+        'challenge': '챌린지 모드'
+    };
+    
+    document.getElementById('gameMode').textContent = modeTexts[selectedMode];
+    
+    // 게임 시작 메시지 표시
+    document.getElementById('gameStartMessage').style.display = 'block';
+    
+    // 카운트다운 시작
+    startCountdown(selectedMode);
+}
+
+// 카운트다운 함수
+function startCountdown(selectedMode) {
+    let count = 3;
+    const countdownElement = document.getElementById('countdown');
+    const readyTextElement = document.getElementById('readyText');
+    
+    // 카운트다운 애니메이션
+    const countdownInterval = setInterval(() => {
+        countdownElement.textContent = count;
+        
+        if (count === 0) {
+            clearInterval(countdownInterval);
+            readyTextElement.textContent = '시작!';
+            
+            // 1초 후 게임 실제 시작
+            setTimeout(() => {
+                document.getElementById('gameStartMessage').style.display = 'none';
+                document.getElementById('modeSelect').style.display = 'block';
+                initializeGame(selectedMode);
+            }, 1000);
+        } else {
+            count--;
+        }
+    }, 1000);
+}
+
+// 실제 게임 초기화
+function initializeGame(selectedMode) {
+    mode = selectedMode;
+    obstacles = []; coins=[]; powerups=[]; chaser={x:lanes[1],y:canvas.height-200};
+    speed=5; frame=0; distance=0; score=0; gameOver=false;
+    playerLane=1; playerState='run';
+    playerAnimFrame=0; jumpStartY=0; slideStartFrame=0;
+    playerY = canvas.height - 100; // 플레이어 위치 초기화
+    health = 100; // 생명력 초기화
+    if(mode==='time') timeLeft=60;
+    
+    // 게임 시작 확인
+    console.log(`게임 상태: mode=${mode}, gameOver=${gameOver}, playerY=${playerY}`);
+    console.log(`캔버스 크기: ${canvas.width}x${canvas.height}`);
+    console.log(`초기 장애물 수: ${obstacles.length}`);
+    
+    // 게임 루프 시작
+    startGameLoop();
+}
+
+// 게임 루프 시작
+function startGameLoop() {
+    if(!gameRunning) {
+        gameRunning = true;
+        lastTime = 0; // 시간 초기화
+        console.log('게임 루프 시작');
+        animationId = requestAnimationFrame(gameLoop);
+    }
+}
+
+// 게임 루프 중단
+function stopGameLoop() {
+    if(gameRunning) {
+        gameRunning = false;
+        if(animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+        console.log('게임 루프 중단');
+    }
+}
+
+// 게임 오버 메시지 표시
+function showGameOverMessage(customMessage = '게임 오버!') {
+    // 게임 루프 즉시 중단
+    stopGameLoop();
+    
+    // 기록 업데이트
+    if(mode) {
+        updateRecord(mode, score);
+    }
+    
+    const gameStartMessage = document.getElementById('gameStartMessage');
+    const countdownElement = document.getElementById('countdown');
+    const gameModeElement = document.getElementById('gameMode');
+    const readyTextElement = document.getElementById('readyText');
+    
+    // 게임 오버 메시지 설정
+    countdownElement.textContent = customMessage;
+    countdownElement.style.fontSize = '2rem';
+    countdownElement.style.color = '#ff6b6b';
+    gameModeElement.textContent = `최종 점수: ${score}`;
+    readyTextElement.textContent = `거리: ${Math.floor(distance)}m`;
+    
+    // 메시지 표시
+    gameStartMessage.style.display = 'block';
+    
+    // 3초 후 메시지 숨기고 모드 선택 버튼 표시
+    setTimeout(() => {
+        gameStartMessage.style.display = 'none';
+        document.getElementById('modeSelect').style.display = 'block';
+        
+        // 카운트다운 스타일 초기화
+        countdownElement.style.fontSize = '4rem';
+        countdownElement.style.color = '#ff6b6b';
+        
+        // 게임 상태 초기화
+        resetGameState();
+    }, 3000);
+}
+
+// 모드별 특별 효과 그리기
+function drawModeEffects() {
+    if(!mode) return;
+    
+    switch(mode) {
+        case 'time':
+            drawTimeEffects();
+            break;
+        case 'survival':
+            drawSurvivalEffects();
+            break;
+        case 'challenge':
+            drawChallengeEffects();
+            break;
+        default:
+            drawClassicEffects();
+    }
+}
+
+// 클래식 모드 효과 (파티클)
+function drawClassicEffects() {
+    ctx.fillStyle = '#3498db';
+    for(let i = 0; i < 5; i++) {
+        const x = (frame * 2 + i * 50) % canvas.width;
+        const y = Math.sin(frame * 0.1 + i) * 20 + canvas.height / 2;
+        ctx.fillRect(x, y, 2, 2);
+    }
+}
+
+// 타임어택 모드 효과 (시계 바늘)
+function drawTimeEffects() {
+    const centerX = canvas.width - 50;
+    const centerY = 50;
+    const radius = 30;
+    
+    // 시계 원
+    ctx.strokeStyle = '#8e44ad';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // 초침
+    const secondAngle = (timeLeft % 60) * 6 * Math.PI / 180;
+    ctx.strokeStyle = '#e74c3c';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(
+        centerX + Math.cos(secondAngle - Math.PI/2) * radius * 0.8,
+        centerY + Math.sin(secondAngle - Math.PI/2) * radius * 0.8
+    );
+    ctx.stroke();
+}
+
+// 서바이벌 모드 효과 (생명력 표시)
+function drawSurvivalEffects() {
+    const healthBarWidth = 200;
+    const healthBarHeight = 20;
+    const healthBarX = canvas.width - healthBarWidth - 20;
+    const healthBarY = 20;
+    
+    // 실제 생명력 변수 사용
+    const healthWidth = (health / 100) * healthBarWidth;
+    
+    // 생명력 바만 그리기 (배경 제거)
+    ctx.fillStyle = health > 50 ? '#2ecc71' : health > 25 ? '#f39c12' : '#e74c3c';
+    ctx.fillRect(healthBarX, healthBarY, healthWidth, healthBarHeight);
+    
+    // 테두리만 유지
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+    
+    // 생명력 수치 표시
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '14px Arial';
+    ctx.fillText(`HP: ${Math.floor(health)}`, healthBarX, healthBarY - 5);
+}
+
+// 챌린지 모드 효과 (난이도 표시)
+function drawChallengeEffects() {
+    const difficultyX = 20;
+    const difficultyY = 20;
+    
+    // 난이도 텍스트
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = '16px Arial';
+    ctx.fillText(`난이도: ${Math.floor(speed)}`, difficultyX, difficultyY);
+    
+    // 난이도 바
+    const difficultyBarWidth = 150;
+    const difficultyBarHeight = 10;
+    const difficultyLevel = Math.min(speed / 10, 1);
+    
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(difficultyX, difficultyY + 10, difficultyBarWidth, difficultyBarHeight);
+    
+    ctx.fillStyle = difficultyLevel > 0.7 ? '#e74c3c' : difficultyLevel > 0.4 ? '#f39c12' : '#2ecc71';
+    ctx.fillRect(difficultyX, difficultyY + 10, difficultyBarWidth * difficultyLevel, difficultyBarHeight);
+}
+
+// 게임 상태 초기화
+function resetGameState() {
+    mode = null;
+    gameOver = true;
+    gameRunning = false;
+    obstacles = [];
+    coins = [];
+    powerups = [];
+    frame = 0;
+    distance = 0;
+    score = 0;
+    speed = 5;
+    playerLane = 1;
+    playerState = 'run';
+    playerAnimFrame = 0;
+    jumpStartY = 0;
+    slideStartFrame = 0;
+    playerY = canvas.height - 100;
+    timeLeft = 60;
+    health = 100; // 생명력 초기화
+    
+    console.log('게임 상태 초기화 완료');
+}
+
+// 스폰
+function spawnObjects(){
+    // 게임 시작 후 1초(60프레임) 후부터 장애물 스폰
+    if(frame >= 60 && frame % Math.max(30, Math.floor(60 - speed)) === 0){
+        const lane = Math.floor(Math.random()*3);
+        obstacles.push({x: lanes[lane], y:-20, type:'block'});
+        console.log(`장애물 스폰: lane=${lane}, frame=${frame}`);
+    }
+    // 코인 - 게임 시작 후 1초 후부터
+    if(frame >= 60 && frame % 60 ===0){
+        const lane = Math.floor(Math.random()*3);
+        coins.push({x: lanes[lane], y:-20});
+    }
+    // 파워업 - 게임 시작 후 1초 후부터
+    if(frame >= 60 && frame % 300 ===0){
+        const lane = Math.floor(Math.random()*3);
+        powerups.push({x: lanes[lane], y:-20, type: Math.random()<0.5?'magnet':'boost'});
+    }
+}
+
+// 업데이트
+function updateObjects(){
+    if(gameOver) {
+        console.log('게임 오버 상태로 업데이트 중단');
+        return;
+    }
+
+    obstacles.forEach(o=>o.y+=speed);
+    coins.forEach(c=>c.y+=speed);
+    powerups.forEach(p=>p.y+=speed);
+    chaser.y+=speed*0.8;
+    
+    // 업데이트 로그 (매 60프레임마다)
+    if(frame % 60 === 0) {
+        console.log(`업데이트: frame=${frame}, obstacles=${obstacles.length}, coins=${coins.length}, speed=${speed}`);
+    }
+
+    // 충돌
+    obstacles.forEach(o=>{
+        if(o.y+20>playerY && o.y<playerY+20 && o.x===lanes[playerLane]){
+            if(playerState!=='slide'){
+                gameOver=true;
+                showGameOverMessage();
+            }
+        }
+    });
+
+    coins = coins.filter(c=>{
+        if(c.y+10>playerY && c.y<playerY+20 && c.x===lanes[playerLane]){
+            score+=10;
+            // 서바이벌 모드에서 코인을 먹으면 생명력 회복
+            if(mode==='survival') {
+                health += 5; // 생명력 5 회복
+                health = Math.min(100, health); // 최대 100으로 제한
+            }
+            return false;
+        }
+        return c.y<canvas.height;
+    });
+
+    powerups = powerups.filter(p=>{
+        if(p.y+20>playerY && p.y<playerY+20 && p.x===lanes[playerLane]){
+            if(p.type==='magnet') alert('코인 자석 활성화!'); 
+            if(p.type==='boost') speed+=2; 
+            return false;
+        }
+        return p.y<canvas.height;
+    });
+
+    // 부드러운 점프 애니메이션
+    if(playerState==='jump'){
+        playerAnimFrame++;
+        const jumpHeight = 50;
+        const jumpDuration = 20; // 점프 지속 시간
+        
+        if(playerAnimFrame <= jumpDuration/2) {
+            // 상승 구간
+            const progress = playerAnimFrame / (jumpDuration/2);
+            playerY = jumpStartY - (jumpHeight * Math.sin(progress * Math.PI));
+        } else {
+            // 하강 구간
+            const progress = (playerAnimFrame - jumpDuration/2) / (jumpDuration/2);
+            playerY = jumpStartY - (jumpHeight * Math.sin(Math.PI - progress * Math.PI));
+        }
+        
+        if(playerAnimFrame >= jumpDuration) {
+            playerState = 'run';
+            playerY = canvas.height - 100;
+            playerAnimFrame = 0;
+        }
+    } else if(playerState==='slide'){
+        playerAnimFrame++;
+        const slideDuration = 15; // 슬라이드 지속 시간
+        
+        if(playerAnimFrame >= slideDuration) {
+            playerState = 'run';
+            playerAnimFrame = 0;
+        }
+    } else {
+        // 기본 위치로 복귀
+        playerY = canvas.height - 100;
+        playerAnimFrame = 0;
+    }
+
+    // 난이도 증가
+    if(frame % 300===0) speed+=0.5;
+
+    // 거리/점수
+    distance+=0.1;
+    if(mode==='time') timeLeft-=0.0167; // FPS 약 60 기준
+    if(mode==='time' && timeLeft<=0){
+        gameOver=true;
+        showGameOverMessage('타임 업!');
+    }
+    
+    // 서바이벌 모드 생명력 시스템
+    if(mode==='survival') {
+        // 거리에 따라 생명력 감소 (매 프레임마다 0.01씩 감소)
+        health -= 0.01;
+        
+        // 생명력이 0 이하가 되면 게임 오버
+        if(health <= 0) {
+            gameOver = true;
+            showGameOverMessage('생명력 고갈!');
+        }
+        
+        // 생명력을 0-100 범위로 제한
+        health = Math.max(0, Math.min(100, health));
+    }
+
+    frame++;
+}
+
+// 모드별 배경 색상 정의 (흐린 색상으로 수정)
+const modeBackgrounds = {
+    'classic': {
+        primary: '#4a5a6b',
+        secondary: '#5a6b7c',
+        accent: '#3498db',
+        pattern: 'solid'
+    },
+    'time': {
+        primary: '#a064b4',
+        secondary: '#b074c4',
+        accent: '#e74c3c',
+        pattern: 'gradient'
+    },
+    'survival': {
+        primary: '#a8e6a3',
+        secondary: '#b8f6b3',
+        accent: '#f39c12',
+        pattern: 'solid'
+    },
+    'challenge': {
+        primary: '#d0494b',
+        secondary: '#e0595b',
+        accent: '#f1c40f',
+        pattern: 'checker'
+    }
+};
+
+// 배경 그리기 함수
+function drawBackground() {
+    const bg = modeBackgrounds[mode] || modeBackgrounds['classic'];
+    
+    switch(bg.pattern) {
+        case 'gradient':
+            drawGradientBackground(bg);
+            break;
+        case 'stripes':
+            drawStripedBackground(bg);
+            break;
+        case 'checker':
+            drawCheckerBackground(bg);
+            break;
+        default:
+            drawSolidBackground(bg);
+    }
+}
+
+// 단색 배경
+function drawSolidBackground(bg) {
+    ctx.fillStyle = bg.primary;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 그라디언트 배경
+function drawGradientBackground(bg) {
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, bg.primary);
+    gradient.addColorStop(1, bg.secondary);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 줄무늬 배경
+function drawStripedBackground(bg) {
+    ctx.fillStyle = bg.primary;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = bg.secondary;
+    for(let i = 0; i < canvas.height; i += 40) {
+        ctx.fillRect(0, i, canvas.width, 20);
+    }
+}
+
+// 체크무늬 배경
+function drawCheckerBackground(bg) {
+    ctx.fillStyle = bg.primary;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = bg.secondary;
+    const size = 30;
+    for(let x = 0; x < canvas.width; x += size) {
+        for(let y = 0; y < canvas.height; y += size) {
+            if((x / size + y / size) % 2 === 0) {
+                ctx.fillRect(x, y, size, size);
+            }
+        }
+    }
+}
+
+// 그리기
+function drawObjects(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // 모드별 배경 그리기
+    drawBackground();
+
+    // 모드별 색상 가져오기
+    const bg = modeBackgrounds[mode] || modeBackgrounds['classic'];
+    
+    // 플레이어 (모드별 색상)
+    const playerColors = {
+        'classic': { run: '#3498db', jump: '#2ecc71', slide: '#e74c3c' },
+        'time': { run: '#e74c3c', jump: '#f39c12', slide: '#9b59b6' },
+        'survival': { run: '#1e8449', jump: '#d68910', slide: '#a93226' },
+        'challenge': { run: '#f1c40f', jump: '#e74c3c', slide: '#8e44ad' }
+    };
+    
+    const colors = playerColors[mode] || playerColors['classic'];
+    ctx.fillStyle = playerState === 'run' ? colors.run : 
+                    playerState === 'jump' ? colors.jump : colors.slide;
+    
+    // 슬라이드 상태일 때 플레이어 크기 조정
+    if(playerState === 'slide') {
+        const slideProgress = playerAnimFrame / 15; // 슬라이드 진행도
+        const slideHeight = 20 * (1 - slideProgress * 0.5); // 높이를 50%까지 줄임
+        ctx.fillRect(lanes[playerLane]-10, playerY + (20 - slideHeight), 20, slideHeight);
+    } else {
+        ctx.fillRect(lanes[playerLane]-10, playerY, 20, 20);
+    }
+
+    // 장애물 (모드별 색상 - 더 진하게 수정)
+    const obstacleColors = {
+        'classic': '#c0392b',
+        'time': '#6c3483',
+        'survival': '#d68910',
+        'challenge': '#a93226'
+    };
+    ctx.fillStyle = obstacleColors[mode] || obstacleColors['classic'];
+    obstacles.forEach(o=>ctx.fillRect(o.x-10, o.y, 20,20));
+
+    // 코인 (모드별 색상)
+    const coinColors = {
+        'classic': '#f1c40f',
+        'time': '#e67e22',
+        'survival': '#27ae60',
+        'challenge': '#f39c12'
+    };
+    ctx.fillStyle = coinColors[mode] || coinColors['classic'];
+    coins.forEach(c=>ctx.fillRect(c.x-5,c.y,10,10));
+
+    // 파워업 (모드별 색상)
+    const powerupColors = {
+        'classic': '#e67e22',
+        'time': '#9b59b6',
+        'survival': '#16a085',
+        'challenge': '#d35400'
+    };
+    ctx.fillStyle = powerupColors[mode] || powerupColors['classic'];
+    powerups.forEach(p=>ctx.fillRect(p.x-10,p.y,15,15));
+
+    // 추격자 (모드별 색상)
+    const chaserColors = {
+        'classic': '#95a5a6',
+        'time': '#8e44ad',
+        'survival': '#27ae60',
+        'challenge': '#c0392b'
+    };
+    ctx.fillStyle = chaserColors[mode] || chaserColors['classic'];
+    ctx.fillRect(chaser.x-10,chaser.y,20,20);
+
+    // 모드별 특별 효과
+    drawModeEffects();
+
+    // UI
+    if(!mode || gameOver) {
+        document.getElementById('ui').innerText=`게임을 시작하려면 위의 모드 버튼을 클릭하세요`;
+    } else {
+        const currentRecord = gameRecords[mode];
+        const recordText = `최고: ${currentRecord.best} | 직전: ${currentRecord.last}`;
+        document.getElementById('ui').innerText=`점수: ${score} | 거리: ${Math.floor(distance)}m${mode==='time'?` | 남은시간: ${Math.floor(timeLeft)}s`:''} | ${recordText}`;
+    }
+}
+
+// 게임 루프 - 부드러운 애니메이션을 위한 델타타임 적용
+let lastTime = 0;
+let deltaTime = 0;
+let accumulator = 0;
+const targetFPS = 60;
+const frameInterval = 1000 / targetFPS;
+
+function gameLoop(currentTime){
+    // 게임이 실행 중이 아니면 루프 종료
+    if(!gameRunning) {
+        console.log('게임 루프 종료');
+        return;
+    }
+    
+    // 첫 번째 프레임 처리
+    if(lastTime === 0) {
+        lastTime = currentTime;
+        deltaTime = 0;
+    } else {
+        deltaTime = currentTime - lastTime;
+        lastTime = currentTime;
+    }
+    
+    // 프레임 드롭 방지를 위한 최대 델타타임 제한
+    deltaTime = Math.min(deltaTime, 50);
+    
+    accumulator += deltaTime;
+    
+    // 게임이 시작된 경우에만 업데이트 실행 (mode가 설정되고 gameOver가 false인 경우)
+    if(mode && !gameOver && gameRunning) {
+        // 첫 번째 프레임에서 게임 시작 확인
+        if(frame === 0) {
+            console.log('게임 업데이트 시작!');
+        }
+        
+        // 고정된 시간 간격으로 게임 로직 업데이트
+        while(accumulator >= frameInterval) {
+            spawnObjects();
+            updateObjects();
+            accumulator -= frameInterval;
+        }
+    } else if(mode && gameOver) {
+        // 게임 오버 상태에서 루프 중단
+        console.log(`게임 오버 상태: mode=${mode}, gameOver=${gameOver}`);
+        stopGameLoop();
+        return;
+    }
+    
+    // 매 프레임마다 렌더링 (부드러운 애니메이션)
+    drawObjects();
+    
+    // 다음 프레임 예약
+    animationId = requestAnimationFrame(gameLoop);
+}
+
+// 모바일에서 더 나은 성능을 위한 최적화
+function optimizeForMobile() {
+    // 터치 이벤트 최적화
+    document.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+    
+    // 더블탭 줌 방지
+    document.addEventListener('gesturestart', (e) => {
+        e.preventDefault();
+    });
+    
+    // iOS Safari에서 주소창 숨김 방지
+    window.addEventListener('scroll', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+    
+    // 배터리 절약을 위한 가시성 API 활용
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // 페이지가 숨겨졌을 때 게임 일시정지
+            if(gameRunning) {
+                stopGameLoop();
+                console.log('페이지 숨김으로 게임 일시정지');
+            }
+        } else if(gameRunning) {
+            // 페이지가 다시 보일 때 게임 재시작
+            startGameLoop();
+            console.log('페이지 표시로 게임 재시작');
+        }
+    });
+    
+    // 모바일에서 더 나은 터치 반응성
+    document.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+    
+    document.addEventListener('touchend', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+}
+
+// 초기화
+optimizeForMobile();
+loadRecords(); // 기록 로드
+// 게임 루프는 게임 시작 시에만 시작됨
+</script>
+</body>
+</html>
