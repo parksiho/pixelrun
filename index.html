@@ -167,8 +167,6 @@ button:focus { outline: none; }
 <!-- 모바일 컨트롤 버튼 -->
 <div id="mobileControls">
     <div class="mobile-btn" id="leftBtn">←</div>
-    <div class="mobile-btn" id="jumpBtn">↑</div>
-    <div class="mobile-btn" id="slideBtn">↓</div>
     <div class="mobile-btn" id="rightBtn">→</div>
 </div>
 
@@ -251,8 +249,6 @@ document.addEventListener('keydown', e=>{
 function setupMobileControls() {
     const leftBtn = document.getElementById('leftBtn');
     const rightBtn = document.getElementById('rightBtn');
-    const jumpBtn = document.getElementById('jumpBtn');
-    const slideBtn = document.getElementById('slideBtn');
 
     // 터치 이벤트 처리
     function addTouchEvents(element, action) {
@@ -276,23 +272,6 @@ function setupMobileControls() {
     addTouchEvents(rightBtn, () => {
         if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
         if(playerLane < 2) playerLane++;
-    });
-    
-    addTouchEvents(jumpBtn, () => {
-        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
-        if(playerState === 'run') {
-            jumpStartY = playerY;
-            playerState = 'jump';
-            playerAnimFrame = 0;
-        }
-    });
-    
-    addTouchEvents(slideBtn, () => {
-        if(gameOver || !mode) return; // 게임이 시작되지 않았으면 무시
-        if(playerState === 'run') {
-            playerState = 'slide';
-            playerAnimFrame = 0;
-        }
     });
 }
 
@@ -520,6 +499,58 @@ function drawModeEffects() {
     }
 }
 
+// 파워업 메시지 표시 함수
+function showPowerupMessage(message) {
+    // 기존 메시지가 있다면 제거
+    const existingMessage = document.getElementById('powerupMessage');
+    if(existingMessage) {
+        existingMessage.remove();
+    }
+    
+    // 새 메시지 요소 생성
+    const messageElement = document.createElement('div');
+    messageElement.id = 'powerupMessage';
+    messageElement.textContent = message;
+    messageElement.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #f1c40f;
+        font-size: 24px;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        z-index: 200;
+        pointer-events: none;
+        animation: fadeInOut 1s ease-in-out;
+    `;
+    
+    // CSS 애니메이션 추가
+    if(!document.getElementById('powerupAnimation')) {
+        const style = document.createElement('style');
+        style.id = 'powerupAnimation';
+        style.textContent = `
+            @keyframes fadeInOut {
+                0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+                20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+                80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    // 메시지를 body에 추가
+    document.body.appendChild(messageElement);
+    
+    // 1초 후 자동 제거
+    setTimeout(() => {
+        if(messageElement.parentNode) {
+            messageElement.remove();
+        }
+    }, 1000);
+}
+
 // 클래식 모드 효과 (파티클)
 function drawClassicEffects() {
     ctx.fillStyle = '#3498db';
@@ -689,8 +720,11 @@ function updateObjects(){
 
     powerups = powerups.filter(p=>{
         if(p.y+20>playerY && p.y<playerY+20 && p.x===lanes[playerLane]){
-            if(p.type==='magnet') alert('코인 자석 활성화!'); 
-            if(p.type==='boost') speed+=2; 
+            if(p.type==='magnet') showPowerupMessage('코인 자석 활성화!'); 
+            if(p.type==='boost') {
+                speed+=2; 
+                showPowerupMessage('스피드 부스트!');
+            }
             return false;
         }
         return p.y<canvas.height;
