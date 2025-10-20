@@ -48,9 +48,13 @@ button {
     color: white;
     border-radius: 4px;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
 }
 button:hover { background: #555; }
 button:active { background: #666; }
+button:focus { outline: none; }
 
 /* 모바일 컨트롤 버튼 */
 #mobileControls {
@@ -254,10 +258,12 @@ function setupMobileControls() {
     function addTouchEvents(element, action) {
         element.addEventListener('touchstart', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             action();
         });
         element.addEventListener('click', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             action();
         });
     }
@@ -1014,19 +1020,43 @@ function optimizeForMobile() {
         }
     });
     
-    // 모바일에서 더 나은 터치 반응성
+    // 모바일에서 더 나은 터치 반응성 (버튼 제외)
     document.addEventListener('touchstart', (e) => {
-        e.preventDefault();
+        // 버튼이나 UI 요소가 아닌 경우에만 preventDefault
+        if(!e.target.closest('button') && !e.target.closest('#modeSelect')) {
+            e.preventDefault();
+        }
     }, { passive: false });
     
     document.addEventListener('touchend', (e) => {
-        e.preventDefault();
+        // 버튼이나 UI 요소가 아닌 경우에만 preventDefault
+        if(!e.target.closest('button') && !e.target.closest('#modeSelect')) {
+            e.preventDefault();
+        }
     }, { passive: false });
+}
+
+// 모바일 게임 모드 버튼 터치 이벤트 추가
+function setupMobileModeButtons() {
+    const buttons = document.querySelectorAll('#modeSelect button');
+    buttons.forEach(button => {
+        button.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            button.click();
+        }, { passive: false });
+        
+        button.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        }, { passive: false });
+    });
 }
 
 // 초기화
 optimizeForMobile();
 loadRecords(); // 기록 로드
+setupMobileModeButtons(); // 모바일 모드 버튼 설정
 // 게임 루프는 게임 시작 시에만 시작됨
 </script>
 </body>
